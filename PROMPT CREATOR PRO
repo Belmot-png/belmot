@@ -1,0 +1,308 @@
+"""
+
+PROMPT CREATOR.
+
+Este módulo implementa um assistente criador de prompts para geração de imagem e texto
+utilizando a API do Google Gemini. Este agente irá criar prompts com maestria para o que você precisar.
+
+Autor: Leoni Santos "Belmot"
+Data: Maio de 2025
+Versão: 2.0
+
+"""
+
+
+
+# --- SETUP INICIAL ---
+
+import sys
+!pip -q install Google
+!pip -q install google-adk
+
+import os
+from google.colab import userdata
+import google.genai as genai
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
+import textwrap
+from IPython.display import display, Markdown
+import warnings
+import re
+
+warnings.filterwarnings("ignore")
+
+# --- CONFIGURAÇÃO DA API KEY ---
+
+try:
+    api_key_value = userdata.get('GOOGLE_API_KEY')
+    if api_key_value is None:
+        raise ValueError("GOOGLE_API_KEY não encontrada no Colab Secrets. Por favor, adicione-a.")
+    os.environ["GOOGLE_API_KEY"] = api_key_value
+    print("GOOGLE_API_KEY carregada com sucesso!")
+except Exception as e:
+    print(f"Erro ao carregar/configurar GOOGLE_API_KEY: {e}")
+    print("Certifique-se de que a chave 'GOOGLE_API_KEY' existe e está acessível no Colab Secrets.")
+    sys.exit()
+
+ADK_MODEL_ID = "gemini-2.0-flash"
+print(f"Usando o modelo para ADK: {ADK_MODEL_ID}")
+
+
+# --- FUNÇÃO CALL_AGENT ---
+
+def call_agent(agent: Agent, message_text: str, session_id_suffix: str = "agent_call") -> str:
+    session_service = InMemorySessionService() 
+    session_id = f"session_{agent.name.lower().replace(' ', '_')}_{session_id_suffix}"
+
+    try:
+        session = session_service.create_session(
+            app_name=agent.name,
+            user_id="user1", 
+            session_id=session_id
+        )
+    except Exception as e:
+        print(f"Aviso/Erro ao tentar criar a sessão '{session_id}' explicitamente: {e}.")
+
+    runner = Runner(agent=agent, app_name=agent.name, session_service=session_service)
+    content = genai_types.Content(role="user", parts=[genai_types.Part(text=message_text)])
+
+    final_response = ""
+    print(f"\n")
+    try:
+        for event in runner.run(user_id="user1", session_id=session_id, new_message=content):
+            if event.is_final_response():
+              for part in event.content.parts:
+                if part.text is not None:
+                  final_response += part.text
+                  final_response += "\n"
+    except Exception as e:
+        print(f"Erro CRÍTICO durante a execução do agente '{agent.name}' na sessão '{session_id}': {e}")
+        return f"Erro ao processar a solicitação com o agente '{agent.name}'. Detalhe: {e}"
+    return final_response.strip()
+
+# --- FUNÇÃO PARA EXIBIR TEXTO ---
+
+def display_agent_output(text):
+    text = re.sub(r"(?i)\*\*Prompt Revisado:\*\*", "## Prompt Revisado", text)
+    text = re.sub(r"(?i)\*\*Perguntas:\*\*", "\n## Perguntas", text)
+    display(Markdown(textwrap.indent(text, '> ', predicate=lambda _: True)))
+
+def extract_section(text, section_title):
+    pattern_str = rf"^\*\*{re.escape(section_title)}:\*\*(.*?)(?=(^\*\*.*:\*\*$)|$)"
+    match = re.search(pattern_str, text, re.MULTILINE | re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+# --- INSTRUÇÕES PARA O AGENTE DE PROMPT ENGINEERING ---
+
+PROMPT_ENGINEER_INSTRUCTIONS = """
+Você é o "Prompt Engineer Pro", um assistente de IA especializado em ajudar usuários a criar os melhores prompts possíveis para diversas necessidades, incluindo geração de imagens e texto. Seu objetivo é guiar o usuário através de um processo iterativo para refinar a ideia inicial dele em um prompt claro, conciso, detalhado e eficaz.
+
+Siga este processo:
+
+1.  **Entendimento Inicial:** Com base na primeira solicitação do usuário (sobre o que deve ser o prompt e se é para imagem ou texto), você já deve tentar gerar uma primeira versão robusta e bem detalhada do prompt na seção "Prompt Revisado". Não faça muitas perguntas inicialmente, seja proativo e criativo.
+2.  **Geração Iterativa:** Para cada interação, você fornecerá duas seções:
+    *   **a) Prompt Revisado:** Apresente o prompt atualizado. Ele deve ser claro, conciso e facilmente compreensível pela IA de destino. Incorpore as informações mais recentes do usuário e suas próprias melhorias.
+    *   **b) Perguntas:** Faça 2-3 perguntas relevantes e específicas que ajudem a obter informações adicionais do usuário para melhorar ainda mais o prompt na próxima iteração. As perguntas devem ser direcionadas para adicionar detalhes, clareza, ou explorar aspectos que podem ter sido omitidos.
+3.  **Refinamento Contínuo:** Continue este processo iterativo. A cada resposta do usuário, atualize o "Prompt Revisado" e formule novas "Perguntas".
+
+**Diretrizes para Prompts de IMAGEM:**
+Ao criar prompts para IMAGENS, considere e pergunte sobre (se apropriado):
+*   Sujeito principal e seus detalhes (aparência, ação, emoção).
+*   Cenário/Ambiente (localização, hora do dia, elementos de fundo).
+*   Composição e Enquadramento (close-up, plano médio, ângulo da câmera).
+*   Estilo Artístico (fotorrealismo, pintura, cartoon, anime, artista específico, etc.).
+*   Iluminação (natural, dramática, suave, neon).
+*   Atmosfera/Humor (alegre, sombrio, épico, sereno).
+*   Paleta de Cores.
+*   Nível de Detalhe/Qualidade (ex: "highly detailed", "8K", "masterpiece").
+*   Parâmetros específicos da plataforma (ex: --ar 16:9, --style raw). Sugira-os se souber a plataforma alvo.
+
+**Diretrizes para Prompts de TEXTO:**
+Ao criar prompts para TEXTO, considere e pergunte sobre (se apropriado):
+*   Objetivo Principal (informar, persuadir, criar, resumir, analisar).
+*   Verbo de Ação Claro (Escreva, Analise, Crie, Desenvolva, Resuma).
+*   Tópico/Entidade Específica.
+*   Formato da Saída (e-mail, post de blog, código, lista, roteiro).
+*   Público-Alvo.
+*   Tom e Estilo (formal, amigável, técnico, criativo).
+*   Informações Essenciais a Incluir/Excluir.
+*   Comprimento/Nível de Detalhe.
+*   Estrutura Desejada (seções, pontos).
+*   Persona para a IA (ex: "Aja como um especialista em marketing").
+
+Seja sempre prestativo, criativo e focado em ajudar o usuário a obter o melhor prompt possível.
+Lembre-se de sempre fornecer as seções "**Prompt Revisado:**" e "**Perguntas:**" em suas respostas, começando cada título de seção em uma nova linha.
+"""
+
+# --- CRIAÇÃO DO AGENTE DE PROMPT ENGINEERING ---
+
+print("\nConfigurando o Agente Prompt Engineer Pro...")
+try:
+    prompt_engineer_agent = Agent(
+        name="PromptEngineerPro",
+        model=ADK_MODEL_ID,
+    )
+    print(f"Agente '{prompt_engineer_agent.name}' configurado com modelo: {ADK_MODEL_ID}")
+except Exception as e:
+    print(f"Ocorreu um erro inesperado ao criar o agente: {e}")
+    sys.exit()
+
+# --- LOOP DE INTERAÇÃO PRINCIPAL ---
+
+if 'prompt_engineer_agent' in globals():
+    print("\n--- Bem-vindo ao Assistente de Criação de Prompts! ---")
+    print("Vou te ajudar a criar o prompt perfeito.")
+
+    tipo_prompt_usuario = ""
+    while tipo_prompt_usuario.lower() not in ["imagem", "texto"]:
+        tipo_prompt_usuario = input("Você quer criar um prompt para gerar IMAGEM ou TEXTO? ").strip().lower()
+        if tipo_prompt_usuario.lower() not in ["imagem", "texto"]:
+            print("Opção inválida. Por favor, digite 'imagem' ou 'texto'.")
+
+    ideia_inicial_usuario = input(f"Qual é a ideia principal para o seu prompt de {tipo_prompt_usuario}? ").strip()
+
+    prompt_atual_construido = ""
+    resposta_usuario_anterior = ""
+    session_suffix_counter = 0
+
+    while True:
+        session_suffix_counter += 1
+        if not prompt_atual_construido: # Primeira iteração
+            mensagem_para_agente = f"""
+{PROMPT_ENGINEER_INSTRUCTIONS}
+
+--- INÍCIO DA SESSÃO DE PROMPT ENGINEERING ---
+TAREFA INICIAL:
+O usuário quer criar um prompt de '{tipo_prompt_usuario}'.
+A ideia inicial do usuário é: "{ideia_inicial_usuario}"
+
+Com base nisso, forneça a primeira versão do "**Prompt Revisado:**" e suas "**Perguntas:**" para refinar. Seja proativo e crie um bom primeiro rascunho detalhado para o prompt.
+Lembre-se de iniciar cada título de seção (**Prompt Revisado:**, **Perguntas:**) em uma nova linha.
+"""
+        else: # Iterações subsequentes
+            mensagem_para_agente = f"""
+{PROMPT_ENGINEER_INSTRUCTIONS}
+
+--- CONTINUAÇÃO DA SESSÃO DE PROMPT ENGINEERING ---
+CONTEXTO ATUAL:
+Estamos refinando um prompt de '{tipo_prompt_usuario}'.
+O **Prompt Revisado** até agora é:
+{prompt_atual_construido}
+
+RESPOSTA DO USUÁRIO ÀS PERGUNTAS ANTERIORES:
+{resposta_usuario_anterior}
+
+TAREFA:
+Com base no prompt atual e na resposta do usuário, atualize o "**Prompt Revisado:**" e formule novas "**Perguntas:**" para o próximo refinamento.
+Lembre-se de iniciar cada título de seção (**Prompt Revisado:**, **Perguntas:**) em uma nova linha.
+"""
+
+        resposta_agente_completa = call_agent(
+            agent=prompt_engineer_agent,
+            message_text=mensagem_para_agente,
+            session_id_suffix=f"iteracao_{session_suffix_counter}"
+        )
+
+        if "Erro ao processar" in resposta_agente_completa or not resposta_agente_completa:
+            print(resposta_agente_completa if resposta_agente_completa else "O agente não retornou uma resposta.")
+            print("Não foi possível continuar. Tente novamente ou verifique os logs de erro.")
+            break # Sai do loop em caso de erro crítico
+
+        # Extrai as seções da resposta do agente
+        # Essas variáveis agora guardam o resultado da última interação
+        ultimo_prompt_revisado_extraido = extract_section(resposta_agente_completa, "Prompt Revisado")
+        ultimas_perguntas_extraidas = extract_section(resposta_agente_completa, "Perguntas")
+
+        print("\n--- Resposta do Prompt Engineer Pro ---")
+
+        # Atualiza o prompt_atual_construido com a última versão extraída, se houver.
+        # Este será o prompt usado se o usuário decidir finalizar AGORA.
+        if ultimo_prompt_revisado_extraido:
+            prompt_atual_construido = ultimo_prompt_revisado_extraido # Atualiza o prompt principal
+            display(Markdown("## Prompt Revisado (Rodada Atual)"))
+            display(Markdown(textwrap.indent(prompt_atual_construido, '> ', predicate=lambda _: True)))
+        elif resposta_agente_completa and not ultimas_perguntas_extraidas: # Se não houve prompt revisado, mas houve resposta sem perguntas
+            print("[O agente não forneceu um 'Prompt Revisado' claro, usando resposta completa como fallback.]")
+            prompt_atual_construido = resposta_agente_completa
+            display(Markdown("## Prompt (Resposta Completa como Fallback)"))
+            display(Markdown(textwrap.indent(prompt_atual_construido, '> ', predicate=lambda _: True)))
+        else:
+            print("[O prompt anterior será mantido se você finalizar agora.]")
+
+        # Exibe as perguntas da rodada atual, se houver
+        if ultimas_perguntas_extraidas:
+            display(Markdown("\n## Perguntas para Refinamento (Rodada Atual)"))
+            display(Markdown(textwrap.indent(ultimas_perguntas_extraidas, '> ', predicate=lambda _: True)))
+            print("-" * 30)
+
+            # A resposta do usuário será usada para a PRÓXIMA iteração ou para decidir FINALIZAR
+            resposta_usuario_para_proxima_iteracao_ou_finalizar = input("Suas respostas/feedback (ou digite 'fim' se o prompt estiver bom): ").strip()
+        else:
+            print("\n")
+            resposta_usuario_para_proxima_iteracao_ou_finalizar = input("Digite 'PRONTO' se o prompt estiver bom, ou forneça mais instruções/correções: ").strip()
+
+        # Verifica se o usuário quer finalizar
+        if resposta_usuario_para_proxima_iteracao_ou_finalizar.upper() == 'fim', 'FIM', 'Fim', 'FIm', 'fiM', 'fIM', 'FiM':
+            print("\n--- Prompt Finalizado ---")
+
+            # O prompt_final_pt é o prompt_atual_construido da ÚLTIMA atualização bem-sucedida
+            prompt_final_pt = prompt_atual_construido
+
+            # Limpeza final para garantir que não haja perguntas (medida de segurança)
+            if prompt_final_pt:
+                if "**Perguntas:**" in prompt_final_pt:
+                    prompt_final_pt = prompt_final_pt.split("**Perguntas:**")[0].strip()
+                if "Perguntas:" in prompt_final_pt:
+                    prompt_final_pt = prompt_final_pt.split("Perguntas:")[0].strip()
+            else:
+                print("ERRO: Não foi possível obter um prompt final para exibir ou traduzir.")
+                break
+
+            display(Markdown("## Seu Prompt Final (Português):"))
+            display(Markdown(textwrap.indent(prompt_final_pt, '> ', predicate=lambda _: True)))
+
+            # --- INÍCIO DA TRADUÇÃO PARA INGLÊS ---
+
+            if prompt_final_pt:
+                mensagem_para_traducao = f"""
+                Por favor, traduza o seguinte texto para o inglês de forma precisa e natural.
+                Mantenha o significado e a intenção do texto original.
+                Responda APENAS com o texto traduzido, sem nenhum comentário adicional, saudações, explicações ou formatação como "Prompt Revisado:".
+
+                Texto para traduzir:
+                ---
+                {prompt_final_pt}
+                ---
+                """
+                prompt_em_ingles = call_agent(
+                    agent=prompt_engineer_agent,
+                    message_text=mensagem_para_traducao,
+                    session_id_suffix=f"traducao_final_{session_suffix_counter}"
+                )
+
+                if prompt_em_ingles and "Erro ao processar" not in prompt_em_ingles:
+                    display(Markdown("\n## Seu Prompt Final (English):"))
+                    prompt_em_ingles_limpo = prompt_em_ingles.replace("Prompt Revisado:", "").strip()
+                    display(Markdown(textwrap.indent(prompt_em_ingles_limpo, '> ', predicate=lambda _: True)))
+                elif not prompt_em_ingles:
+                    print("O agente não retornou a tradução.")
+                else:
+                    print(f"Erro durante a tradução: {prompt_em_ingles}")
+            else:
+                print("Nenhum prompt em português disponível para tradução.")
+            # --- FIM DA TRADUÇÃO PARA INGLÊS ---
+
+            print("\nÓtimo! Espero que este prompt gere excelentes resultados!")
+            break
+        else:
+            resposta_usuario_anterior = resposta_usuario_para_proxima_iteracao_ou_finalizar
+
+elif not resposta_usuario_anterior and not perguntas_do_agente:
+             print("Nenhuma entrada fornecida e nenhuma pergunta feita. Se o prompt estiver bom, digite 'PRONTO'.")
+
+else:
+    print("Agente 'PromptEngineerPro' não foi configurado. Encerrando.")
