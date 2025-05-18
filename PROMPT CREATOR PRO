@@ -17,11 +17,13 @@ Versão: 2.0
 
 import sys
 !pip -q install Google
+!pip -q install google-genai
 !pip -q install google-adk
 
 import os
 from google.colab import userdata
 import google.genai as genai
+from google.generativeai import GenerativeModel
 from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -47,6 +49,7 @@ except Exception as e:
     sys.exit()
 
 ADK_MODEL_ID = "gemini-2.0-flash"
+TRANSLATION_MODEL_ID = "gemini-2.0-flash"
 print(f"Usando o modelo para ADK: {ADK_MODEL_ID}")
 
 
@@ -210,49 +213,37 @@ Lembre-se de iniciar cada título de seção (**Prompt Revisado:**, **Perguntas:
         if "Erro ao processar" in resposta_agente_completa or not resposta_agente_completa:
             print(resposta_agente_completa if resposta_agente_completa else "O agente não retornou uma resposta.")
             print("Não foi possível continuar. Tente novamente ou verifique os logs de erro.")
-            break # Sai do loop em caso de erro crítico
+            break
 
-        # Extrai as seções da resposta do agente
-        # Essas variáveis agora guardam o resultado da última interação
         ultimo_prompt_revisado_extraido = extract_section(resposta_agente_completa, "Prompt Revisado")
         ultimas_perguntas_extraidas = extract_section(resposta_agente_completa, "Perguntas")
 
         print("\n--- Resposta do Prompt Engineer Pro ---")
 
-        # Atualiza o prompt_atual_construido com a última versão extraída, se houver.
-        # Este será o prompt usado se o usuário decidir finalizar AGORA.
         if ultimo_prompt_revisado_extraido:
-            prompt_atual_construido = ultimo_prompt_revisado_extraido # Atualiza o prompt principal
+            prompt_atual_construido = ultimo_prompt_revisado_extraido
             display(Markdown("## Prompt Revisado (Rodada Atual)"))
             display(Markdown(textwrap.indent(prompt_atual_construido, '> ', predicate=lambda _: True)))
-        elif resposta_agente_completa and not ultimas_perguntas_extraidas: # Se não houve prompt revisado, mas houve resposta sem perguntas
+        elif resposta_agente_completa and not ultimas_perguntas_extraidas:
             print("[O agente não forneceu um 'Prompt Revisado' claro, usando resposta completa como fallback.]")
             prompt_atual_construido = resposta_agente_completa
-            display(Markdown("## Prompt (Resposta Completa como Fallback)"))
+            display(Markdown("## Prompt "))
             display(Markdown(textwrap.indent(prompt_atual_construido, '> ', predicate=lambda _: True)))
         else:
             print("[O prompt anterior será mantido se você finalizar agora.]")
 
-        # Exibe as perguntas da rodada atual, se houver
         if ultimas_perguntas_extraidas:
             display(Markdown("\n## Perguntas para Refinamento (Rodada Atual)"))
             display(Markdown(textwrap.indent(ultimas_perguntas_extraidas, '> ', predicate=lambda _: True)))
             print("-" * 30)
-
-            # A resposta do usuário será usada para a PRÓXIMA iteração ou para decidir FINALIZAR
             resposta_usuario_para_proxima_iteracao_ou_finalizar = input("Suas respostas/feedback (ou digite 'fim' se o prompt estiver bom): ").strip()
         else:
             print("\n")
-            resposta_usuario_para_proxima_iteracao_ou_finalizar = input("Digite 'PRONTO' se o prompt estiver bom, ou forneça mais instruções/correções: ").strip()
+            resposta_usuario_para_proxima_iteracao_ou_finalizar = input("Digite 'fim' se o prompt estiver bom, ou forneça mais instruções/correções: ").strip()
 
-        # Verifica se o usuário quer finalizar
-        if resposta_usuario_para_proxima_iteracao_ou_finalizar.upper() == 'fim', 'FIM', 'Fim', 'FIm', 'fiM', 'fIM', 'FiM':
+        if resposta_usuario_para_proxima_iteracao_ou_finalizar.lower() == 'fim':
             print("\n--- Prompt Finalizado ---")
-
-            # O prompt_final_pt é o prompt_atual_construido da ÚLTIMA atualização bem-sucedida
             prompt_final_pt = prompt_atual_construido
-
-            # Limpeza final para garantir que não haja perguntas (medida de segurança)
             if prompt_final_pt:
                 if "**Perguntas:**" in prompt_final_pt:
                     prompt_final_pt = prompt_final_pt.split("**Perguntas:**")[0].strip()
@@ -266,43 +257,42 @@ Lembre-se de iniciar cada título de seção (**Prompt Revisado:**, **Perguntas:
             display(Markdown(textwrap.indent(prompt_final_pt, '> ', predicate=lambda _: True)))
 
             # --- INÍCIO DA TRADUÇÃO PARA INGLÊS ---
-
             if prompt_final_pt:
+                print("\nTraduzindo para o Inglês...")
                 mensagem_para_traducao = f"""
                 Por favor, traduza o seguinte texto para o inglês de forma precisa e natural.
-                Mantenha o significado e a intenção do texto original.
-                Responda APENAS com o texto traduzido, sem nenhum comentário adicional, saudações, explicações ou formatação como "Prompt Revisado:".
+                Mantenha o significado e a intenção do texto original, incluindo quaisquer termos técnicos ou parâmetros.
+                Responda APENAS com o texto traduzido, sem nenhum comentário adicional, saudações, explicações ou formatação como "Prompt Revisado:" ou markdown.
 
                 Texto para traduzir:
                 ---
                 {prompt_final_pt}
                 ---
                 """
-                prompt_em_ingles = call_agent(
-                    agent=prompt_engineer_agent,
-                    message_text=mensagem_para_traducao,
-                    session_id_suffix=f"traducao_final_{session_suffix_counter}"
-                )
+                try:
+                    # Certifique-se que TRANSLATION_MODEL_ID está definido no início do script
+                    translation_model = GenerativeModel(TRANSLATION_MODEL_ID)
+                    response = translation_model.generate_content(mensagem_para_traducao)
+                    prompt_em_ingles = response.text.strip()
+                except Exception as e_translate:
+                    prompt_em_ingles = ""
+                    print(f"Erro CRÍTICO durante a tradução: {e_translate}")
 
-                if prompt_em_ingles and "Erro ao processar" not in prompt_em_ingles:
+                if prompt_em_ingles: 
                     display(Markdown("\n## Seu Prompt Final (English):"))
-                    prompt_em_ingles_limpo = prompt_em_ingles.replace("Prompt Revisado:", "").strip()
-                    display(Markdown(textwrap.indent(prompt_em_ingles_limpo, '> ', predicate=lambda _: True)))
-                elif not prompt_em_ingles:
-                    print("O agente não retornou a tradução.")
-                else:
-                    print(f"Erro durante a tradução: {prompt_em_ingles}")
+                    display(Markdown(textwrap.indent(prompt_em_ingles, '> ', predicate=lambda _: True)))
+                elif not prompt_em_ingles and 'e_translate' not in locals(): 
+                    print("O modelo não retornou a tradução (resposta vazia).")
+                
             else:
-                print("Nenhum prompt em português disponível para tradução.")
+                print("Nenhum prompt em português disponível para tradução (para a etapa de tradução).")
+
             # --- FIM DA TRADUÇÃO PARA INGLÊS ---
 
             print("\nÓtimo! Espero que este prompt gere excelentes resultados!")
             break
-        else:
+        else: # Este else corresponde ao if resposta_usuario_para_proxima_iteracao_ou_finalizar.lower() == 'fim':
             resposta_usuario_anterior = resposta_usuario_para_proxima_iteracao_ou_finalizar
 
 elif not resposta_usuario_anterior and not perguntas_do_agente:
-             print("Nenhuma entrada fornecida e nenhuma pergunta feita. Se o prompt estiver bom, digite 'PRONTO'.")
-
-else:
-    print("Agente 'PromptEngineerPro' não foi configurado. Encerrando.")
+             print("Nenhuma entrada fornecida e nenhuma pergunta feita. Se o prompt estiver bom, digite 'fim'.")
