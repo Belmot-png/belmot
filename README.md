@@ -106,15 +106,3 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para m
 (Se você não tiver um arquivo LICENSE, pode adicionar um ou escolher uma licença apropriada.)
 
 ---
-
-Espero que este README seja útil, Leoni! Sinta-se à vontade para ajustá-lo conforme suas preferências.
-Use code with caution.
-Markdown
-Próximos Passos:
-Crie um arquivo chamado README.md na pasta principal do seu projeto.
-Copie e cole o conteúdo acima nesse arquivo.
-Revise e personalize:
-Verifique se a data "Maio de 2025" está correta para a versão final.
-Ajuste a seção "Como Contribuir" e "Licença" se necessário (a licença MIT é um bom padrão para projetos open-source, mas você pode escolher outra ou omitir se for um projeto pessoal não compartilhado).
-Adicione quaisquer outros detalhes que achar relevantes.
-Parabéns por ter chegado até aqui com o seu projeto! Foi uma jornada e tanto com a depuração! 😊
