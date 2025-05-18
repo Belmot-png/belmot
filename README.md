@@ -1,7 +1,9 @@
 # PROMPT CREATOR v2.0
 
 **Autor:** Leoni Santos "Belmot"
+
 **Data:** Maio de 2025 (Conforme código fonte)
+
 **Versão:** 2.0
 
 ## Descrição
